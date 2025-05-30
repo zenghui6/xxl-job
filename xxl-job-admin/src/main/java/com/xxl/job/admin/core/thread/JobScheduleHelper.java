@@ -42,7 +42,9 @@ public class JobScheduleHelper {
             public void run() {
 
                 try {
-                    TimeUnit.MILLISECONDS.sleep(5000 - System.currentTimeMillis()%1000 );
+                    //这条语句的作用是让当前线程休眠，直至下一个 5 秒整的时刻。在 JobScheduleHelper 类里，
+                    // 这或许是为了让调度线程的执行时间与 5 秒的时间间隔对齐，从而实现更精准的任务调度。
+                    TimeUnit.MILLISECONDS.sleep(5000 - System.currentTimeMillis() % 1000);
                 } catch (Throwable e) {
                     if (!scheduleThreadToStop) {
                         logger.error(e.getMessage(), e);
@@ -51,6 +53,7 @@ public class JobScheduleHelper {
                 logger.info(">>>>>>>>> init xxl-job admin scheduler success.");
 
                 // pre-read count: treadpool-size * trigger-qps (each trigger cost 50ms, qps = 1000/50 = 20)
+                // 每个触发器花费50ms,每个线程单位时间内处理20任务,最多同时处理300*20=6000任务
                 int preReadCount = (XxlJobAdminConfig.getAdminConfig().getTriggerPoolFastMax() + XxlJobAdminConfig.getAdminConfig().getTriggerPoolSlowMax()) * 20;
 
                 while (!scheduleThreadToStop) {
@@ -66,9 +69,10 @@ public class JobScheduleHelper {
                     try {
 
                         conn = XxlJobAdminConfig.getAdminConfig().getDataSource().getConnection();
+                        // 事务：设置手动提交
                         connAutoCommit = conn.getAutoCommit();
                         conn.setAutoCommit(false);
-
+                        //获取任务调度锁表内数据信息,加写锁
                         preparedStatement = conn.prepareStatement(  "select * from xxl_job_lock where lock_name = 'schedule_lock' for update" );
                         preparedStatement.execute();
 
@@ -76,12 +80,14 @@ public class JobScheduleHelper {
 
                         // 1、pre read
                         long nowTime = System.currentTimeMillis();
+                        //获取当前时间后5秒,同时最多负载的分页数
                         List<XxlJobInfo> scheduleList = XxlJobAdminConfig.getAdminConfig().getXxlJobInfoDao().scheduleJobQuery(nowTime + PRE_READ_MS, preReadCount);
                         if (scheduleList!=null && scheduleList.size()>0) {
                             // 2、push time-ring
                             for (XxlJobInfo jobInfo: scheduleList) {
 
                                 // time-ring jump
+                                //触发器过期时间>5s
                                 if (nowTime > jobInfo.getTriggerNextTime() + PRE_READ_MS) {
                                     // 2.1、trigger-expire > 5s：pass && make next-trigger-time
                                     logger.warn(">>>>>>>>>>> xxl-job, schedule misfire, jobId = " + jobInfo.getId());

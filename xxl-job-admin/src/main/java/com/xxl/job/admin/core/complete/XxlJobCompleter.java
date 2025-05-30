@@ -27,7 +27,7 @@ public class XxlJobCompleter {
      */
     public static int updateHandleInfoAndFinish(XxlJobLog xxlJobLog) {
 
-        // finish
+        // finish若父任务正常结束，则终止子任务,以及设置Childmsg
         finishJob(xxlJobLog);
 
         // text最大64kb 避免长度过长

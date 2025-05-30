@@ -13,8 +13,10 @@ import org.springframework.util.StringUtils;
 import java.util.*;
 import java.util.concurrent.*;
 
-/**
- * job registry instance
+/** 这里干了三件事：
+ * 1. 初始化注册或者删除线程池，主要负责客户端注册或者销毁到xxl_job_registry表
+ * 2. 剔除超时注册机器
+ * 3. 更新xxl_job_group执行器地址列表
  * @author xuxueli 2016-10-02 19:10:24
  */
 public class JobRegistryHelper {
@@ -32,6 +34,7 @@ public class JobRegistryHelper {
 	public void start(){
 
 		// for registry or remove
+		// 初始化注册或删除线程池
 		registryOrRemoveThreadPool = new ThreadPoolExecutor(
 				2,
 				10,
@@ -44,6 +47,7 @@ public class JobRegistryHelper {
 						return new Thread(r, "xxl-job, admin JobRegistryMonitorHelper-registryOrRemoveThreadPool-" + r.hashCode());
 					}
 				},
+			// 注意，这里的拒绝策略是直接运行任务，而不是抛弃任务。
 				new RejectedExecutionHandler() {
 					@Override
 					public void rejectedExecution(Runnable r, ThreadPoolExecutor executor) {
@@ -52,28 +56,35 @@ public class JobRegistryHelper {
 					}
 				});
 
-		// for monitor
+		// for monitor 死循环30s执行一次，用于监控注册信息，判断是有有节点超过90s没有心跳
 		registryMonitorThread = new Thread(new Runnable() {
 			@Override
 			public void run() {
 				while (!toStop) {
 					try {
 						// auto registry group
+						//查询自动注册的数据
+						//这里如果没添加自动注册的数据，则不会进入该方法，然后删除register表中超时注册数据。
 						List<XxlJobGroup> groupList = XxlJobAdminConfig.getAdminConfig().getXxlJobGroupDao().findByAddressType(0);
 						if (groupList!=null && !groupList.isEmpty()) {
 
 							// remove dead address (admin/executor)
+							// 1):从注册表中删除超时90s的机器,不分是否自动注册
 							List<Integer> ids = XxlJobAdminConfig.getAdminConfig().getXxlJobRegistryDao().findDead(RegistryConfig.DEAD_TIMEOUT, new Date());
 							if (ids!=null && ids.size()>0) {
+								//从数据库删除注册机器信息
 								XxlJobAdminConfig.getAdminConfig().getXxlJobRegistryDao().removeDead(ids);
 							}
 
-							// fresh online address (admin/executor)
+							// 获取所有在线机器,注册表: 见"xxl_job_registry"表, "执行器" 在进行任务注册时将会周期性维护一条注册记录，
+							// 即机器地址和AppName的绑定关系; "调度中心" 从而可以动态感知每个AppName在线的机器列表;
 							HashMap<String, List<String>> appAddressMap = new HashMap<String, List<String>>();
 							List<XxlJobRegistry> list = XxlJobAdminConfig.getAdminConfig().getXxlJobRegistryDao().findAll(RegistryConfig.DEAD_TIMEOUT, new Date());
 							if (list != null) {
 								for (XxlJobRegistry item: list) {
+									// 2):将注册类型为EXECUTOR的XxlJobRegistry集合改装成appname=>设置触发器的ip地址
 									if (RegistryConfig.RegistType.EXECUTOR.name().equals(item.getRegistryGroup())) {
+										//AppName: 每个执行器机器集群的唯一标示, 任务注册以 "执行器" 为最小粒度进行注册; 每个任务通过其绑定的执行器可感知对应的执行器机器列表;
 										String appname = item.getRegistryKey();
 										List<String> registryList = appAddressMap.get(appname);
 										if (registryList == null) {
@@ -89,6 +100,7 @@ public class JobRegistryHelper {
 							}
 
 							// fresh group address
+							// 3):刷新注册的执行器机器地址列表, 即更新"xxl_job_group"表的"addressList"字段
 							for (XxlJobGroup group: groupList) {
 								List<String> registryList = appAddressMap.get(group.getAppname());
 								String addressListStr = null;
@@ -103,7 +115,7 @@ public class JobRegistryHelper {
 								}
 								group.setAddressList(addressListStr);
 								group.setUpdateTime(new Date());
-
+								//将注册表中appname对应的多条ip地址，整成appname-> ips(IP1,IP2,IP3)格式存储xxl_job_group表中，只针对自动注册。
 								XxlJobAdminConfig.getAdminConfig().getXxlJobGroupDao().update(group);
 							}
 						}

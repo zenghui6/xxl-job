@@ -10,7 +10,9 @@ import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * job trigger thread pool helper
+ * 创建两个线程池，一个快，一个慢，快的线程池用于处理快的任务，慢的线程池用于处理慢的任务。
+ * 这里分别初始化了2个线程池，一个快一个慢，优先选择快，当一分钟以内任务超过10次执行时间超过500ms，则加入慢线程池执行。
+ * 这样可以避免线程池中的线程被阻塞，提高系统的性能。
  *
  * @author xuxueli 2018-07-03 21:08:07
  */
@@ -20,7 +22,7 @@ public class JobTriggerPoolHelper {
 
     // ---------------------- trigger pool ----------------------
 
-    // fast/slow thread pool
+    // 快，慢线程池
     private ThreadPoolExecutor fastTriggerPool = null;
     private ThreadPoolExecutor slowTriggerPool = null;
 

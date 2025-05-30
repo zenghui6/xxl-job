@@ -34,6 +34,7 @@ public class XxlJobAdminConfig implements InitializingBean, DisposableBean {
 
     @Override
     public void afterPropertiesSet() throws Exception {
+        // 利用静态声明只会加载一次的特性，初始化一个单例对象
         adminConfig = this;
 
         xxlJobScheduler = new XxlJobScheduler();
